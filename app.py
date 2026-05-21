@@ -36,14 +36,12 @@ def get_today_midnight_timestamp():
 def load_accounts(server_name):
     """Load UID:Password from server-specific file"""
     try:
-        # Map server to filename - ME ADDED
+        # Map server to filename
         if server_name == "IND":
             filename = "account_ind.txt"
         elif server_name in {"BR", "US", "SAC", "NA"}:
             filename = "account_br.txt"
-        elif server_name == "ME":  # ✅ ME REGION ADDED
-            filename = "account_me.txt"
-        else:  # BD, RU and others
+        else:  # BD and others
             filename = "account_bd.txt"
         
         # Check if file exists
@@ -114,6 +112,18 @@ def create_protobuf_message(user_id, region):
     message.region = region
     return message.SerializeToString()
 
+async def check_if_already_liked(target_uid, token, server_name):
+    """Check if already liked by getting profile info"""
+    try:
+        encrypted_uid = enc(target_uid)
+        info = get_player_info(encrypted_uid, server_name, token)
+        if info:
+            # Can't directly check, so we'll rely on response
+            return False
+        return False
+    except:
+        return False
+
 async def send_like(encrypted_uid, token, url):
     """Send like with token"""
     try:
@@ -135,6 +145,9 @@ async def send_like(encrypted_uid, token, url):
 async def process_account(target_uid, encrypted_uid, account, url, semaphore, server_name):
     """Process single account with smart checking"""
     async with semaphore:
+        # Check if this account already liked this UID today
+        account_key = f"{account['uid']}:{target_uid}"
+        
         # Generate token
         token = await generate_jwt_token(account['uid'], account['password'])
         if not token:
@@ -181,7 +194,7 @@ async def send_all_likes(target_uid, server_name, url):
     
     semaphore = asyncio.Semaphore(25)
     tasks = []
-    for acc in fresh_accounts[:2000]:
+    for acc in fresh_accounts[:2000]:  # Limit to 50 fresh accounts per request
         tasks.append(process_account(target_uid, encrypted_uid, acc, url, semaphore, server_name))
     
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -224,7 +237,7 @@ def get_player_info(encrypted_uid, server_name, token):
         url = "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
     elif server_name in {"BR", "US", "SAC", "NA"}:
         url = "https://client.us.freefiremobile.com/GetPlayerPersonalShow"
-    else:  # ME, BD, RU
+    else:
         url = "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow"
 
     edata = bytes.fromhex(encrypted_uid)
@@ -255,8 +268,8 @@ def handle_requests():
     if not uid or not server_name:
         return jsonify({"error": "UID and server_name are required"}), 400
 
-    # Valid servers - ME ADDED
-    valid_servers = ["IND", "BR", "US", "SAC", "NA", "BD", "RU", "ME"]
+    # Valid servers
+    valid_servers = ["IND", "BR", "US", "SAC", "NA", "BD","RU"]
     if server_name not in valid_servers:
         return jsonify({"error": f"Invalid server. Use: {valid_servers}"}), 400
 
@@ -304,12 +317,12 @@ def handle_requests():
     except:
         return jsonify({"error": "Data parsing failed", "status": 0}), 200
 
-    # Like URL based on server - ME ADDED
+    # Like URL based on server
     if server_name == "IND":
         like_url = "https://client.ind.freefiremobile.com/LikeProfile"
     elif server_name in {"BR", "US", "SAC", "NA"}:
         like_url = "https://client.us.freefiremobile.com/LikeProfile"
-    else:  # ME, BD, RU
+    else:
         like_url = "https://clientbp.ggpolarbear.com/LikeProfile"
 
     # Send likes with smart checking
@@ -363,8 +376,10 @@ if __name__ == '__main__':
     print("📁 Account files:")
     print("   - account_ind.txt (IND server)")
     print("   - account_br.txt (BR/US/SAC/NA servers)")
-    print("   - account_me.txt (ME server)")  # ✅ ME ADDED
     print("   - account_bd.txt (BD/RU server)")
     print("🧠 Smart feature: Tracks which accounts already liked")
     print("⚡ Only fresh accounts will send likes")
     app.run(host='0.0.0.0', port=5001, debug=True, use_reloader=False)
+# STAR LIKE API SRC UID PASSWORD 
+# POWERED BY : @ZAINU_BHAI
+# CHANNEL : @ZAINUBHAIFF
