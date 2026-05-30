@@ -1,7 +1,6 @@
-# ZAINU LIKE API WITH MIDDLE EAST SUPPORT
+# ZAINU LIKE API SRC UID PASSWORD 
 # POWERED BY : @ZAINU_BHAI
 # CHANNEL : @ZAINUBHAIFF
-
 from flask import Flask, request, jsonify
 import asyncio
 from Crypto.Cipher import AES
@@ -24,7 +23,9 @@ import urllib.parse
 app = Flask(__name__)
 
 KEY_LIMIT = 90
-tracker = defaultdict(lambda: [0, time.time()])
+tracker = defaultdict(lambda: [0, time.time()])  # IP based tracking
+
+# Store which accounts have liked which UIDs (temporary memory)
 liked_cache = defaultdict(set)
 
 def get_today_midnight_timestamp():
@@ -35,14 +36,12 @@ def get_today_midnight_timestamp():
 def load_accounts(server_name):
     """Load UID:Password from server-specific file"""
     try:
-        # Map server to filename (UPDATED with MIDDLE EAST)
+        # Map server to filename
         if server_name == "IND":
             filename = "account_ind.txt"
-        elif server_name == "ME":  # 🆕 MIDDLE EAST
-            filename = "account_me.txt"
         elif server_name in {"BR", "US", "SAC", "NA"}:
             filename = "account_br.txt"
-        else:  # BD, RU and others
+        else:  # BD and others
             filename = "account_bd.txt"
         
         # Check if file exists
@@ -113,6 +112,18 @@ def create_protobuf_message(user_id, region):
     message.region = region
     return message.SerializeToString()
 
+async def check_if_already_liked(target_uid, token, server_name):
+    """Check if already liked by getting profile info"""
+    try:
+        encrypted_uid = enc(target_uid)
+        info = get_player_info(encrypted_uid, server_name, token)
+        if info:
+            # Can't directly check, so we'll rely on response
+            return False
+        return False
+    except:
+        return False
+
 async def send_like(encrypted_uid, token, url):
     """Send like with token"""
     try:
@@ -134,14 +145,18 @@ async def send_like(encrypted_uid, token, url):
 async def process_account(target_uid, encrypted_uid, account, url, semaphore, server_name):
     """Process single account with smart checking"""
     async with semaphore:
+        # Check if this account already liked this UID today
         account_key = f"{account['uid']}:{target_uid}"
         
+        # Generate token
         token = await generate_jwt_token(account['uid'], account['password'])
         if not token:
             return 500, account['uid']
         
+        # Send like
         status = await send_like(encrypted_uid, token, url)
         
+        # If successful, mark as liked
         if status == 200:
             liked_cache[target_uid].add(account['uid'])
             return status, account['uid']
@@ -158,6 +173,7 @@ async def send_all_likes(target_uid, server_name, url):
     if not accounts: 
         return {'success': 0, 'failed': 0, 'total': 0, 'already_liked': 0}
     
+    # Filter out accounts that already liked this UID
     already_liked = liked_cache.get(target_uid, set())
     fresh_accounts = [acc for acc in accounts if acc['uid'] not in already_liked]
     
@@ -178,7 +194,7 @@ async def send_all_likes(target_uid, server_name, url):
     
     semaphore = asyncio.Semaphore(25)
     tasks = []
-    for acc in fresh_accounts[:2000]:
+    for acc in fresh_accounts[:2000]:  # Limit to 50 fresh accounts per request
         tasks.append(process_account(target_uid, encrypted_uid, acc, url, semaphore, server_name))
     
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -216,13 +232,9 @@ def decode_protobuf(binary):
         return None
 
 def get_player_info(encrypted_uid, server_name, token):
-    """Get player info with proper URL for each server (UPDATED with MIDDLE EAST)"""
-    
-    # 🆕 MIDDLE EAST URL added
+    """Get player info with proper URL for each server"""
     if server_name == "IND":
         url = "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
-    elif server_name == "ME":  # Middle East
-        url = "https://client.me.freefiremobile.com/GetPlayerPersonalShow"
     elif server_name in {"BR", "US", "SAC", "NA"}:
         url = "https://client.us.freefiremobile.com/GetPlayerPersonalShow"
     else:
@@ -256,18 +268,21 @@ def handle_requests():
     if not uid or not server_name:
         return jsonify({"error": "UID and server_name are required"}), 400
 
-    # 🆕 Valid servers - MIDDLE EAST (ME) added
-    valid_servers = ["IND", "BR", "US", "SAC", "NA", "BD", "RU", "ME"]
+    # Valid servers
+    valid_servers = ["IND", "BR", "US", "SAC", "NA", "BD","RU"]
     if server_name not in valid_servers:
         return jsonify({"error": f"Invalid server. Use: {valid_servers}"}), 400
 
+    # Load accounts for this server
     accounts = load_accounts(server_name)
     if not accounts:
+        # Try fallback to IND
         accounts = load_accounts("IND")
         if not accounts:
             return jsonify({"error": f"No accounts found for server {server_name}"}), 500
         print(f"⚠️ Using IND accounts as fallback for {server_name}")
     
+    # Check daily limit
     today_midnight = get_today_midnight_timestamp()
     count, last_reset = tracker[client_ip]
 
@@ -278,6 +293,7 @@ def handle_requests():
     if count >= KEY_LIMIT:
         return jsonify({"error": "Daily limit reached", "remains": f"(0/{KEY_LIMIT})"}), 429
 
+    # Generate token for checking (try multiple accounts)
     check_token = None
     for account in accounts[:5]:
         check_token = asyncio.run(generate_jwt_token(account['uid'], account['password']))
@@ -290,6 +306,7 @@ def handle_requests():
     
     encrypted_uid = enc(uid)
 
+    # Before likes
     before = get_player_info(encrypted_uid, server_name, check_token)
     if before is None:
         return jsonify({"error": "Invalid UID or server", "status": 0}), 200
@@ -300,18 +317,18 @@ def handle_requests():
     except:
         return jsonify({"error": "Data parsing failed", "status": 0}), 200
 
-    # 🆕 Like URL for MIDDLE EAST
+    # Like URL based on server
     if server_name == "IND":
         like_url = "https://client.ind.freefiremobile.com/LikeProfile"
-    elif server_name == "ME":  # Middle East
-        like_url = "https://client.me.freefiremobile.com/LikeProfile"
     elif server_name in {"BR", "US", "SAC", "NA"}:
         like_url = "https://client.us.freefiremobile.com/LikeProfile"
     else:
         like_url = "https://clientbp.ggpolarbear.com/LikeProfile"
 
+    # Send likes with smart checking
     result = asyncio.run(send_all_likes(uid, server_name, like_url))
 
+    # After likes
     after = get_player_info(encrypted_uid, server_name, check_token)
     if after is None:
         return jsonify({"error": "Could not verify likes after command", "status": 0}), 200
@@ -345,6 +362,7 @@ def handle_requests():
 
 @app.route('/reset-cache', methods=['GET'])
 def reset_cache():
+    """Reset liked cache (use carefully)"""
     key = request.args.get("key")
     if key != "ZAINU":
         return jsonify({"error": "Invalid key"}), 403
@@ -354,12 +372,14 @@ def reset_cache():
     return jsonify({"message": "Cache cleared", "credit": "@ZAINU_BHAI"})
 
 if __name__ == '__main__':
-    print("🚀 Server started - Smart Like System WITH MIDDLE EAST!")
+    print("🚀 Server started - Smart Like System!")
     print("📁 Account files:")
     print("   - account_ind.txt (IND server)")
-    print("   - account_me.txt (MIDDLE EAST server) 🆕")
     print("   - account_br.txt (BR/US/SAC/NA servers)")
     print("   - account_bd.txt (BD/RU server)")
-    print("🌍 Supported: IND, BR, US, SAC, NA, BD, RU, ME 🆕")
     print("🧠 Smart feature: Tracks which accounts already liked")
+    print("⚡ Only fresh accounts will send likes")
     app.run(host='0.0.0.0', port=5001, debug=True, use_reloader=False)
+# STAR LIKE API SRC UID PASSWORD 
+# POWERED BY : @ZAINU_BHAI
+# CHANNEL : @ZAINUBHAIFF
